@@ -2,57 +2,197 @@ class TierListManager {
     constructor() {
         this.initializeElements();
         this.setupEventListeners();
-        this.loadSavedLists();
-        this.loadAutoSavedState(); // Nova funcionalidade: carrega estado automaticamente
+        this.setupAutoSave();
+        this.loadAutoSavedData();
     }
 
     initializeElements() {
         this.imageUpload = document.getElementById("imageUpload");
         this.unrankedGames = document.getElementById("unrankedGames");
-        this.saveBtn = document.getElementById("saveBtn");
-        this.loadBtn = document.getElementById("loadBtn");
         this.clearBtn = document.getElementById("clearBtn");
         this.darkModeBtn = document.getElementById("darkModeBtn");
-        this.saveModal = document.getElementById("saveModal");
-        this.loadModal = document.getElementById("loadModal");
-        this.saveNameInput = document.getElementById("saveNameInput");
-        this.confirmSave = document.getElementById("confirmSave");
-        this.savedLists = document.getElementById("savedLists");
         this.tierContents = document.querySelectorAll(".tier-content");
+        this.autoSaveIndicator = document.getElementById("autoSaveIndicator");
         this.currentHoveredGame = null;
         this.isResizing = false;
         this.currentResizeItem = null;
         this.draggedElement = null;
+        this.hasChanges = false;
     }
 
     setupEventListeners() {
         this.imageUpload.addEventListener("change", (e) => this.handleImageUpload(e));
-        this.saveBtn.addEventListener("click", () => this.showSaveModal());
-        this.loadBtn.addEventListener("click", () => this.showLoadModal());
         this.clearBtn.addEventListener("click", () => this.clearAll());
         this.darkModeBtn.addEventListener("click", () => this.toggleDarkMode());
-        this.confirmSave.addEventListener("click", () => this.saveTierList());
         document.addEventListener("keydown", (e) => this.handleKeyPress(e));
         document.addEventListener("paste", (e) => this.handlePaste(e));
         document.addEventListener("mousemove", (e) => this.handleMouseMove(e));
         document.addEventListener("mouseup", (e) => this.handleMouseUp(e));
 
-        document.querySelectorAll(".close").forEach(closeBtn => {
-            closeBtn.addEventListener("click", (e) => {
-                e.target.closest(".modal").style.display = "none";
-            });
-        });
-
-        window.addEventListener("click", (e) => {
-            if (e.target.classList.contains("modal")) {
-                e.target.style.display = "none";
-            }
-        });
-
+        // Observar alterações na tier list
+        this.setupMutationObserver();
         this.setupDragAndDrop();
         this.loadDarkModePreference();
     }
 
+    // =====================
+    // SALVAMENTO AUTOMÁTICO
+    // =====================
+    setupAutoSave() {
+        // Salvar a cada 30 segundos
+        this.autoSaveInterval = setInterval(() => {
+            if (this.hasChanges) {
+                this.autoSave();
+                this.hasChanges = false;
+            }
+        }, 30000);
+        
+        // Salvar também quando o usuário sair da página
+        window.addEventListener("beforeunload", () => {
+            if (this.hasChanges) {
+                this.autoSave();
+            }
+        });
+    }
+
+    markChanges() {
+        this.hasChanges = true;
+    }
+
+    autoSave() {
+        const tierListData = this.exportTierListData();
+        localStorage.setItem("autoSavedTierList", JSON.stringify(tierListData));
+        this.showAutoSaveIndicator();
+    }
+
+    showAutoSaveIndicator(message = "✓ Salvando...") {
+        this.autoSaveIndicator.textContent = message;
+        this.autoSaveIndicator.classList.add("visible");
+        setTimeout(() => {
+            this.autoSaveIndicator.classList.remove("visible");
+        }, 2000);
+    }
+
+    loadAutoSavedData() {
+        const savedData = localStorage.getItem("autoSavedTierList");
+        if (savedData) {
+            const data = JSON.parse(savedData);
+            this.importTierListData(data);
+            this.showAutoSaveIndicator("✓ Tier list restaurada");
+        }
+    }
+
+    exportTierListData() {
+        const data = {
+            unranked: [],
+            tiers: {
+                GOTY: [], AAA: [], AA: [], A: [], B: [], C: [], D: [], E: [], F: []
+            }
+        };
+
+        this.unrankedGames.querySelectorAll(".game-item").forEach(item => {
+            data.unranked.push({
+                src: item.querySelector("img").src,
+                fileName: item.dataset.fileName,
+                tierSelection: item.dataset.selectedSubOption || item.querySelector(".tier-selection")?.textContent || "",
+                width: item.style.width || "80px",
+                height: item.style.height || "80px"
+            });
+        });
+
+        this.tierContents.forEach(tierContent => {
+            const tierName = tierContent.dataset.tier;
+            tierContent.querySelectorAll(".game-item").forEach(item => {
+                data.tiers[tierName].push({
+                    src: item.querySelector("img").src,
+                    fileName: item.dataset.fileName,
+                    tierSelection: item.dataset.selectedSubOption || item.querySelector(".tier-selection")?.textContent || tierName,
+                    width: item.style.width || "80px",
+                    height: item.style.height || "80px"
+                });
+            });
+        });
+
+        return data;
+    }
+
+    importTierListData(data) {
+        this.clearAll(false);
+
+        // Primeiro, adicionamos os jogos não classificados
+        data.unranked.forEach(game => {
+            const gameItem = this.createGameItem(game.src, game.fileName);
+            if (game.tierSelection) {
+                const tierSelection = gameItem.querySelector(".tier-selection");
+                tierSelection.textContent = game.tierSelection;
+                gameItem.dataset.selectedSubOption = game.tierSelection;
+            }
+            if (game.width) gameItem.style.width = game.width;
+            if (game.height) gameItem.style.height = game.height;
+        });
+
+        // Em seguida, adicionamos os jogos classificados
+        Object.entries(data.tiers).forEach(([tierName, games]) => {
+            const tierContent = document.querySelector(`.tier-content[data-tier="${tierName}"]`);
+            if (tierContent) {
+                games.forEach(game => {
+                    const gameItem = document.createElement("div");
+                    gameItem.className = "game-item";
+                    gameItem.draggable = true;
+                    gameItem.dataset.fileName = game.fileName;
+                    gameItem.dataset.tier = tierName;
+                    gameItem.dataset.selectedSubOption = game.tierSelection || "";
+
+                    // Aplicar tamanhos personalizados
+                    if (game.width) gameItem.style.width = game.width;
+                    if (game.height) gameItem.style.height = game.height;
+                    
+                    gameItem.innerHTML = `
+                        <img src="${game.src}" alt="${game.fileName}">
+                        <div class="tier-selection">${game.tierSelection || tierName}</div>
+                        <div class="tier-options"></div>
+                        <div class="resize-handle"></div>
+                    `;
+
+                    // Configurar event listeners
+                    gameItem.addEventListener("dragstart", (e) => this.handleDragStart(e));
+                    gameItem.addEventListener("dragend", (e) => this.handleDragEnd(e));
+                    gameItem.addEventListener("mouseenter", () => {
+                        this.currentHoveredGame = gameItem;
+                    });
+                    gameItem.addEventListener("mouseleave", () => {
+                        if (this.currentHoveredGame === gameItem) {
+                            this.currentHoveredGame = null;
+                        }
+                    });
+
+                    const resizeHandle = gameItem.querySelector(".resize-handle");
+                    resizeHandle.addEventListener("mousedown", (e) => this.handleResizeStart(e, gameItem));
+
+                    // Adicionar diretamente ao conteúdo do tier
+                    tierContent.appendChild(gameItem);
+                    
+                    // Configurar opções de tier
+                    this.setupTierOptions(gameItem);
+                });
+            }
+        });
+    }
+
+    // Observar alterações na estrutura da tier list
+    setupMutationObserver() {
+        const observer = new MutationObserver(() => this.markChanges());
+        
+        // Observar alterações nas áreas de jogos (adicionar/remover itens)
+        observer.observe(this.unrankedGames, { childList: true, subtree: true });
+        this.tierContents.forEach(content => {
+            observer.observe(content, { childList: true, subtree: true });
+        });
+    }
+
+    // =====================
+    // FUNÇÕES EXISTENTES
+    // =====================
     handleImageUpload(event) {
         const files = Array.from(event.target.files);
         files.forEach(file => {
@@ -60,12 +200,12 @@ class TierListManager {
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     this.createGameItem(e.target.result, file.name);
-                    this.autoSaveState(); // Nova funcionalidade: salva automaticamente após adicionar item
                 };
                 reader.readAsDataURL(file);
             }
         });
         event.target.value = "";
+        this.markChanges();
     }
 
     createGameItem(imageSrc, fileName) {
@@ -97,7 +237,8 @@ class TierListManager {
         resizeHandle.addEventListener("mousedown", (e) => this.handleResizeStart(e, gameItem));
 
         this.unrankedGames.appendChild(gameItem);
-        return gameItem; // Retorna o item criado para uso em outras funções
+        this.markChanges();
+        return gameItem;
     }
 
     setupTierOptions(gameItem) {
@@ -130,14 +271,14 @@ class TierListManager {
             e.stopPropagation();
             gameItem.dataset.selectedSubOption = currentTier + "+";
             tierSelection.textContent = currentTier + "+";
-            this.autoSaveState(); // Nova funcionalidade: salva automaticamente após mudança
+            this.markChanges();
         });
         
         downOption.addEventListener("click", (e) => {
             e.stopPropagation();
             gameItem.dataset.selectedSubOption = currentTier + "-";
             tierSelection.textContent = currentTier + "-";
-            this.autoSaveState(); // Nova funcionalidade: salva automaticamente após mudança
+            this.markChanges();
         });
     }
 
@@ -189,228 +330,7 @@ class TierListManager {
         if (this.draggedElement && dropZone !== this.draggedElement.parentNode) {
             dropZone.appendChild(this.draggedElement);
             this.setupTierOptions(this.draggedElement);
-            this.autoSaveState(); // Nova funcionalidade: salva automaticamente após mover item
-        }
-    }
-
-    // Nova funcionalidade: salvamento automático
-    autoSaveState() {
-        try {
-            const tierListData = this.exportTierListData();
-            localStorage.setItem("tierListAutoSave", JSON.stringify({
-                data: tierListData,
-                timestamp: new Date().toISOString()
-            }));
-            console.log("Estado da tierlist salvo automaticamente");
-        } catch (error) {
-            console.error("Erro ao salvar automaticamente:", error);
-        }
-    }
-
-    // Nova funcionalidade: carregamento automático
-    loadAutoSavedState() {
-        try {
-            const autoSavedData = localStorage.getItem("tierListAutoSave");
-            if (autoSavedData) {
-                const parsedData = JSON.parse(autoSavedData);
-                this.importTierListData(parsedData.data);
-                console.log("Estado anterior da tierlist restaurado automaticamente");
-            }
-        } catch (error) {
-            console.error("Erro ao carregar estado salvo automaticamente:", error);
-        }
-    }
-
-    // Nova funcionalidade: limpar salvamento automático
-    clearAutoSavedState() {
-        try {
-            localStorage.removeItem("tierListAutoSave");
-            console.log("Salvamento automático limpo");
-        } catch (error) {
-            console.error("Erro ao limpar salvamento automático:", error);
-        }
-    }
-
-    saveTierList() {
-        const name = this.saveNameInput.value.trim();
-        if (!name) {
-            alert("Por favor, digite um nome para a tier list.");
-            return;
-        }
-        const tierListData = this.exportTierListData();
-        const savedLists = JSON.parse(localStorage.getItem("tierLists") || "{}");
-        savedLists[name] = {
-            data: tierListData,
-            timestamp: new Date().toISOString()
-        };
-        localStorage.setItem("tierLists", JSON.stringify(savedLists));
-        this.saveModal.style.display = "none";
-        this.saveNameInput.value = "";
-        alert("Tier list salva com sucesso!");
-    }
-
-    exportTierListData() {
-        const data = {
-            unranked: [],
-            tiers: {
-                GOTY: [], AAA: [], AA: [], A: [], B: [], C: [], D: [], E: [], F: []
-            }
-        };
-
-        this.unrankedGames.querySelectorAll(".game-item").forEach(item => {
-            data.unranked.push({
-                src: item.querySelector("img").src,
-                fileName: item.dataset.fileName,
-                tierSelection: item.dataset.selectedSubOption || item.querySelector(".tier-selection")?.textContent || ""
-            });
-        });
-
-        this.tierContents.forEach(tierContent => {
-            const tierName = tierContent.dataset.tier;
-            tierContent.querySelectorAll(".game-item").forEach(item => {
-                data.tiers[tierName].push({
-                    src: item.querySelector("img").src,
-                    fileName: item.dataset.fileName,
-                    tierSelection: item.dataset.selectedSubOption || item.querySelector(".tier-selection")?.textContent || tierName
-                });
-            });
-        });
-
-        return data;
-    }
-
-    importTierListData(data) {
-        // Limpa o estado atual antes de importar
-        this.unrankedGames.innerHTML = "";
-        this.tierContents.forEach(tierContent => {
-            tierContent.innerHTML = "";
-        });
-
-        // Importa itens não ranqueados
-        if (data.unranked) {
-            data.unranked.forEach(game => {
-                const gameItem = this.createGameItemFromData(game.src, game.fileName);
-                const tierSelection = gameItem.querySelector(".tier-selection");
-                if (tierSelection) {
-                    tierSelection.textContent = game.tierSelection || "";
-                    gameItem.dataset.selectedSubOption = game.tierSelection || "";
-                }
-                this.unrankedGames.appendChild(gameItem);
-            });
-        }
-
-        // Importa itens das tiers
-        if (data.tiers) {
-            Object.entries(data.tiers).forEach(([tierName, games]) => {
-                const tierContent = document.querySelector(`[data-tier="${tierName}"]`);
-                if (tierContent && games) {
-                    games.forEach(game => {
-                        const gameItem = this.createGameItemFromData(game.src, game.fileName);
-                        gameItem.dataset.tier = tierName;
-                        gameItem.dataset.selectedSubOption = game.tierSelection || "";
-
-                        const tierSelection = gameItem.querySelector(".tier-selection");
-                        tierSelection.textContent = game.tierSelection || tierName;
-
-                        this.setupTierOptions(gameItem);
-                        tierContent.appendChild(gameItem);
-                    });
-                }
-            });
-        }
-    }
-
-    // Nova função auxiliar para criar itens de jogo a partir de dados salvos
-    createGameItemFromData(imageSrc, fileName) {
-        const gameItem = document.createElement("div");
-        gameItem.className = "game-item";
-        gameItem.draggable = true;
-        gameItem.dataset.fileName = fileName;
-
-        gameItem.innerHTML = `
-            <img src="${imageSrc}" alt="${fileName}">
-            <div class="tier-selection"></div>
-            <div class="tier-options"></div>
-            <div class="resize-handle"></div>
-        `;
-
-        gameItem.addEventListener("dragstart", (e) => this.handleDragStart(e));
-        gameItem.addEventListener("dragend", (e) => this.handleDragEnd(e));
-        gameItem.addEventListener("mouseenter", () => {
-            this.currentHoveredGame = gameItem;
-        });
-        gameItem.addEventListener("mouseleave", () => {
-            if (this.currentHoveredGame === gameItem) {
-                this.currentHoveredGame = null;
-            }
-        });
-
-        const resizeHandle = gameItem.querySelector(".resize-handle");
-        resizeHandle.addEventListener("mousedown", (e) => this.handleResizeStart(e, gameItem));
-
-        return gameItem;
-    }
-
-    showSaveModal() {
-        this.saveModal.style.display = "block";
-        this.saveNameInput.focus();
-    }
-
-    showLoadModal() {
-        this.loadModal.style.display = "block";
-        this.displaySavedLists();
-    }
-
-    displaySavedLists() {
-        const savedLists = JSON.parse(localStorage.getItem("tierLists") || "{}");
-        this.savedLists.innerHTML = "";
-
-        if (Object.keys(savedLists).length === 0) {
-            this.savedLists.innerHTML = "<p>Nenhuma tier list salva encontrada.</p>";
-            return;
-        }
-
-        Object.entries(savedLists).forEach(([name, listData]) => {
-            const listItem = document.createElement("div");
-            listItem.className = "saved-list-item";
-            const date = new Date(listData.timestamp).toLocaleDateString("pt-BR");
-            listItem.innerHTML = `
-                <div>
-                    <strong>${name}</strong><br>
-                    <small>Salva em: ${date}</small>
-                </div>
-                <div>
-                    <button class="load-list-btn" onclick="tierListManager.loadTierList('${name}')">Carregar</button>
-                    <button class="delete-list-btn" onclick="tierListManager.deleteSavedList('${name}')">Deletar</button>
-                </div>
-            `;
-            this.savedLists.appendChild(listItem);
-        });
-    }
-
-    loadTierList(name) {
-        const savedLists = JSON.parse(localStorage.getItem("tierLists") || "{}");
-        const listData = savedLists[name];
-        if (!listData) {
-            alert("Tier list não encontrada.");
-            return;
-        }
-        if (confirm("Carregar esta tier list irá substituir a atual. Continuar?")) {
-            this.clearAll(false);
-            this.importTierListData(listData.data);
-            this.loadModal.style.display = "none";
-            this.autoSaveState(); // Salva o novo estado automaticamente
-            alert("Tier list carregada com sucesso!");
-        }
-    }
-
-    deleteSavedList(name) {
-        if (confirm(`Tem certeza que deseja deletar a tier list "${name}"?`)) {
-            const savedLists = JSON.parse(localStorage.getItem("tierLists") || "{}");
-            delete savedLists[name];
-            localStorage.setItem("tierLists", JSON.stringify(savedLists));
-            this.displaySavedLists();
-            alert("Tier list deletada com sucesso!");
+            this.markChanges();
         }
     }
 
@@ -422,12 +342,7 @@ class TierListManager {
         this.tierContents.forEach(tierContent => {
             tierContent.innerHTML = "";
         });
-        this.clearAutoSavedState(); // Nova funcionalidade: limpa o salvamento automático
-    }
-
-    loadSavedLists() {
-        const savedLists = JSON.parse(localStorage.getItem("tierLists") || "{}");
-        console.log(`${Object.keys(savedLists).length} tier lists salvas encontradas.`);
+        this.markChanges();
     }
 
     toggleDarkMode() {
@@ -435,6 +350,7 @@ class TierListManager {
         const isDarkMode = document.body.classList.contains("dark-mode");
         this.darkModeBtn.textContent = isDarkMode ? "☀️ Modo Claro" : "🌙 Modo Escuro";
         localStorage.setItem("darkMode", isDarkMode);
+        this.markChanges();
     }
 
     loadDarkModePreference() {
@@ -456,17 +372,17 @@ class TierListManager {
                     event.preventDefault();
                     gameItem.dataset.selectedSubOption = currentTier + "+";
                     tierSelection.textContent = currentTier + "+";
-                    this.autoSaveState(); // Nova funcionalidade: salva automaticamente
+                    this.markChanges();
                 } else if (event.key === "-") {
                     event.preventDefault();
                     gameItem.dataset.selectedSubOption = currentTier + "-";
                     tierSelection.textContent = currentTier + "-";
-                    this.autoSaveState(); // Nova funcionalidade: salva automaticamente
+                    this.markChanges();
                 } else if (event.key === "Backspace") {
                     event.preventDefault();
                     gameItem.dataset.selectedSubOption = "";
                     tierSelection.textContent = currentTier;
-                    this.autoSaveState(); // Nova funcionalidade: salva automaticamente
+                    this.markChanges();
                 }
             }
         }
@@ -475,8 +391,8 @@ class TierListManager {
             event.preventDefault();
             if (confirm("Tem certeza que deseja deletar este jogo?")) {
                 this.currentHoveredGame.remove();
-                this.currentHoveredGame = null;
-                this.autoSaveState(); // Nova funcionalidade: salva automaticamente após deletar
+                this.currentHovereredGame = null;
+                this.markChanges();
             }
         }
     }
@@ -493,7 +409,6 @@ class TierListManager {
                     const timestamp = new Date().getTime();
                     const fileName = `Imagem_Colada_${timestamp}`;
                     this.createGameItem(e.target.result, fileName);
-                    this.autoSaveState(); // Nova funcionalidade: salva automaticamente após colar
                 };
                 reader.readAsDataURL(blob);
                 break;
@@ -536,7 +451,7 @@ class TierListManager {
             this.currentResizeItem.draggable = true;
             this.currentResizeItem.classList.remove("resizing");
             this.currentResizeItem = null;
-            this.autoSaveState(); // Nova funcionalidade: salva automaticamente após redimensionar
+            this.markChanges();
         }
         document.body.style.userSelect = "";
     }
@@ -548,4 +463,3 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 document.addEventListener("dragover", (e) => e.preventDefault());
 document.addEventListener("drop", (e) => e.preventDefault());
-
