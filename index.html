@@ -14,24 +14,18 @@
             <div class="controls">
                 <input type="file" id="imageUpload" accept="image/*" multiple>
                 <label for="imageUpload" class="upload-btn">Adicionar Jogos</label>
-                <button id="saveBtn" class="save-btn">Salvar Tier List</button>
-                <button id="loadBtn" class="load-btn">Carregar Tier List</button>
                 <button id="clearBtn" class="clear-btn">Limpar Tudo</button>
                 <button id="darkModeBtn" class="dark-mode-btn">🌙 Modo Escuro</button>
             </div>
         </header>
 
         <main>
-            <!-- Área de jogos não classificados -->
             <div class="unranked-section">
                 <h3>Jogos para Classificar</h3>
                 <p class="paste-hint">💡 Dica: Use <kbd>Ctrl + V</kbd> para colar imagens da área de transferência</p>
-                <div id="unrankedGames" class="games-container">
-                    <!-- Jogos adicionados aparecerão aqui -->
-                </div>
+                <div id="unrankedGames" class="games-container"></div>
             </div>
 
-            <!-- Tiers -->
             <div class="tiers-container">
                 <div class="tier" data-tier="GOTY">
                     <div class="tier-label goty">GOTY</div>
@@ -79,25 +73,9 @@
                 </div>
             </div>
         </main>
-    </div>
-
-    <!-- Modal para salvar -->
-    <div id="saveModal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h3>Salvar Tier List</h3>
-            <input type="text" id="saveNameInput" placeholder="Nome da tier list">
-            <button id="confirmSave">Salvar</button>
-        </div>
-    </div>
-
-    <!-- Modal para carregar -->
-    <div id="loadModal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h3>Carregar Tier List</h3>
-            <div id="savedLists"></div>
-        </div>
+        
+        <!-- Indicador de salvamento automático -->
+        <div class="auto-save-indicator" id="autoSaveIndicator">✓ Salvando...</div>
     </div>
 
     <script src="script.js"></script>
